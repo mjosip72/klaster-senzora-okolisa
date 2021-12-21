@@ -4,7 +4,7 @@
 // INIT
 PCF85063A::PCF85063A(void)
 {
-	Wire.begin();
+	//Wire.begin();
 }
 
 // PUBLIC
@@ -53,43 +53,43 @@ void PCF85063A::readTime()
 
 uint8_t PCF85063A::getSecond() 
 {
-	readTime();
+	//readTime();
 	return second;
 }
 
 uint8_t PCF85063A::getMinute() 
 {
-	readTime();
+	//readTime();
 	return minute;
 }
 
 uint8_t PCF85063A::getHour() 
 {
-	readTime();
+	//readTime();
 	return hour;
 }
 
 uint8_t PCF85063A::getDay() 
 {
-	readTime();
+	//readTime();
 	return day;
 }
 
 uint8_t PCF85063A::getWeekday() 
 {
-	readTime();
+	//readTime();
 	return weekday;
 }
 
 uint8_t PCF85063A::getMonth() 
 {
-	readTime();
+	//readTime();
 	return month;
 }
 
 uint16_t PCF85063A::getYear() 
 {
-	readTime();
+	//readTime();
 	return year;
 }
 
