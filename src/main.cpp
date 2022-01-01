@@ -1,14 +1,17 @@
 
-#if true
+#if false
 
 /* #region Includes... */
 #include <Arduino.h>
 #include <bsec.h>
 #include <Adafruit_ILI9341.h>
+#include <FS.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <EEPROM.h>
 #include <PCF85063A.h>
 #include <SparkFunBQ27441.h>
+#include <mbedtls/md.h>
 
 #define DEBUG
 #include "StringUtils.h"
@@ -22,9 +25,11 @@ const uint8_t bsec_config_iaq[] = {
 Bsec bme680;
 uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 
+// https://www.youtube.com/watch?v=rq5yPJbX_uk&ab_channel=XTronical
 
-
+Adafruit_ILI9341 tft(10, 11);
 PCF85063A rtc;
+BQ27441 battery;
 
 /* #region Deklaracije funkcija */
 
@@ -42,7 +47,19 @@ void setup() {
 	Wire.begin();
 	EEPROM.begin(BSEC_MAX_STATE_BLOB_SIZE + 1);
 
-	/* #region */
+
+	/* #region TFT, Battery */
+
+	tft.begin();
+	tft.setRotation(1);
+
+	battery.begin();
+	battery.enterConfig();
+	battery.setCapacity(2100); // 2100 mAh
+	battery.setDesignEnergy(2100 * 3.7f);
+	battery.setTerminateVoltage(3600); // 3.6V
+	battery.setTaperRate(10 * 2100 / 12);
+	battery.exitConfig();
 
 	/* #endregion */
 
