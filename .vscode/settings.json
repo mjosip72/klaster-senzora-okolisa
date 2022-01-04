@@ -1,5 +1,7 @@
 {
   "files.associations": {
-    "*.txt": "cpp"
+    "*.txt": "cpp",
+    "future": "cpp",
+    "system_error": "cpp"
   }
 }
