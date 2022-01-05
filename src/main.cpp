@@ -1,21 +1,37 @@
 
 #if false
 
-/* #region Includes... */
+/* #region Includes */
+
 #include <Arduino.h>
 #include <bsec.h>
-#include <Adafruit_ILI9341.h>
-#include <FS.h>
-#include <SD.h>
 #include <WiFi.h>
-#include <EEPROM.h>
+
+#include <TFT_eSPI.h>
 #include <PCF85063A.h>
 #include <SparkFunBQ27441.h>
-#include <mbedtls/md.h>
 
 #define DEBUG
 #include "StringUtils.h"
+#include "SdUtils.h"
 #include "Log.h"
+
+/* #endregion */
+
+/* #region Pins */
+
+// TFT_SCLK 18
+// TFT_MOSI 23
+// TFT_MISO 19
+
+// TFT_CS 32
+// TFT_DC 33
+// TFT_RST 25
+// TOUCH_CS 26
+
+#define TOUCH_IRQ 27
+#define SD_CS 14
+
 /* #endregion */
 
 const uint8_t bsec_config_iaq[] = {
@@ -25,9 +41,7 @@ const uint8_t bsec_config_iaq[] = {
 Bsec bme680;
 uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 
-// https://www.youtube.com/watch?v=rq5yPJbX_uk&ab_channel=XTronical
-
-Adafruit_ILI9341 tft(10, 11);
+TFT_eSPI tft;
 PCF85063A rtc;
 BQ27441 battery;
 
@@ -44,22 +58,31 @@ void setup() {
 
 	Log::begin(115200);
 
-	Wire.begin();
-	EEPROM.begin(BSEC_MAX_STATE_BLOB_SIZE + 1);
-
-
-	/* #region TFT, Battery */
+	digitalWrite(PIN_TFT_CS, HIGH);
+	digitalWrite(PIN_TOUCH_CS, HIGH);
+	digitalWrite(PIN_SD_CS, HIGH);
 
 	tft.begin();
 	tft.setRotation(1);
 
+	Wire.begin();
+	EEPROM.begin(BSEC_MAX_STATE_BLOB_SIZE + 1);
+
+	/* #region Battery */
+
 	battery.begin();
-	battery.enterConfig();
-	battery.setCapacity(2100); // 2100 mAh
-	battery.setDesignEnergy(2100 * 3.7f);
-	battery.setTerminateVoltage(3600); // 3.6V
-	battery.setTaperRate(10 * 2100 / 12);
-	battery.exitConfig();
+
+	if(battery.itporFlag()) {
+		Log::println("Writing gauge config");
+		battery.enterConfig();
+		battery.setCapacity(2100); // 2100 mAh
+		battery.setDesignEnergy(2100 * 3.7f);
+		battery.setTerminateVoltage(3600); // 3.6V
+		battery.setTaperRate(10 * 2100 / 12);
+		battery.exitConfig();
+	}else{
+		Log::println("Using existing gauge config");
+	}
 
 	/* #endregion */
 
@@ -88,9 +111,12 @@ void setup() {
 
 	/* #endregion */
 
+
 }
 
 void loop() {
+
+	tft.getTouch(0, 0, 0);
 
 }
 
@@ -116,6 +142,8 @@ void loadBsecState() {
   }
   bme680.setState(bsecState);
 
+	Log::println("Loaded");
+
 }
 
 void saveBsecState() {
@@ -130,6 +158,8 @@ void saveBsecState() {
     EEPROM.write(i + 1, bsecState[i]);
   }
   EEPROM.commit();
+
+	Log::println("Saved");
 
 }
 
