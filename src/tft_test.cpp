@@ -1,5 +1,5 @@
 
-#if true
+#if false
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -25,5 +25,12 @@ void setup() {
 void loop() {
   
 }
+
+#endif
+
+#if true
+
+#include <Arduino.h>
+#include "examples.h"
 
 #endif

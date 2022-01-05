@@ -41,6 +41,12 @@ const uint8_t bsec_config_iaq[] = {
 Bsec bme680;
 uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 
+/*
+  uint16_t calData[5] = { 329, 3577, 258, 3473, 7 };
+  tft.setTouch(calData);
+
+*/
+
 TFT_eSPI tft;
 PCF85063A rtc;
 BQ27441 battery;
