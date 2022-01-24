@@ -12,6 +12,10 @@
     "vector": "cpp",
     "string_view": "cpp",
     "initializer_list": "cpp",
-    "regex": "cpp"
+    "regex": "cpp",
+    "*.tcc": "cpp",
+    "memory": "cpp",
+    "random": "cpp",
+    "new": "cpp"
   }
 }
