@@ -9,7 +9,7 @@
 namespace LED {
 
   bool run = false;
-  uint8_t pin;
+  int8_t pin = -1;
   uint8_t blinks = 0;
   uint32_t onTime = 0;
   uint32_t offTime = 0;
@@ -21,6 +21,7 @@ namespace LED {
   }
 
   void start(uint8_t _blinks, uint32_t _onTime, uint32_t _offTime = 0) {
+    if(pin == -1) return;
     if(_offTime == 0) _offTime = _onTime;
     blinks = _blinks;
     onTime = _onTime;

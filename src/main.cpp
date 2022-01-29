@@ -62,8 +62,21 @@ const uint8_t bsec_config_iaq[] = {
 #include "config/generic_33v_3s_4d/bsec_iaq.txt"
 };
 
+bsec_virtual_sensor_t sensorList[10] = {
+	BSEC_OUTPUT_RAW_TEMPERATURE,
+	BSEC_OUTPUT_RAW_PRESSURE,
+	BSEC_OUTPUT_RAW_HUMIDITY,
+	BSEC_OUTPUT_RAW_GAS,
+	BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+	BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,
+	BSEC_OUTPUT_IAQ,
+	BSEC_OUTPUT_STATIC_IAQ,
+	BSEC_OUTPUT_CO2_EQUIVALENT,
+	BSEC_OUTPUT_BREATH_VOC_EQUIVALENT
+};
+
 Bsec bme680;
-uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
+RTC_DATA_ATTR uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 
 TFT_eSPI tft;
 PCF85063A rtc;
@@ -77,8 +90,21 @@ void setTime();
 void syncTime();
 
 void setDisplayMode(uint8_t newDisplayMode);
-void displayEnterSleepMode();
-void displayWakeUp();
+
+namespace DeepSleep {
+
+	RTC_DATA_ATTR bool deepSleep = false;
+
+	void enable();
+	void disable();
+
+	void callSetup();
+	void callLoop();
+
+	bool isEnabled();
+	int64_t GetTimestamp();
+
+}
 
 void displayAirQualitiy();
 void displayTimeClock();
@@ -97,18 +123,34 @@ void turnOffWiFi();
 
 /* #region setup, loop */
 
-uint8_t displayMode = DISPLAY_MODE_AIR_QUALITY;
+RTC_DATA_ATTR uint8_t displayMode = DISPLAY_MODE_AIR_QUALITY;
 char dataBuffer[256];
 char dataBufferMini[32];
 
-bool shouldSaveData = false;
+RTC_DATA_ATTR bool shouldSaveData = false;
 bool wifiOn = false;
 
-bool deepSleep = false;
+RTC_DATA_ATTR uint8_t samplePeriodMinutes = 4;
+RTC_DATA_ATTR uint8_t lastSampledMinute = 100;
 
 Timer timeClock(displayTimeClock);
 
 void setup() {
+
+	bool deepSleepAwakened = false;
+
+	if(DeepSleep::isEnabled()) {
+
+		esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
+		if(wakeupReason == ESP_SLEEP_WAKEUP_EXT0) {
+			deepSleepAwakened = true;
+			DeepSleep::disable();
+		}else{
+			DeepSleep::callSetup();
+			return;
+		}
+
+	}
 
 	Log::begin(115200);
 	Log::println("\nKlaster senzora okolisa\nPowered by: Croduino Nova32 (ESP32) - e-radionica\n");
@@ -127,6 +169,13 @@ void setup() {
 	pinMode(LED_PIN, OUTPUT);
 
 	tft.begin();
+
+	if(deepSleepAwakened) {
+		tft.writecommand(0x11);
+		delay(120);
+		displayMode == DISPLAY_MODE_AIR_QUALITY;
+	}
+
 	tft.setRotation(1);
 
 	uint16_t calData[5] = {329, 3577, 258, 3473, 7};
@@ -135,16 +184,26 @@ void setup() {
 
 	Log::println("Init SD card");
 
-	if(SD.begin(SD_CS) == false) {
-		tft.print("Postavljanje kartice nije uspjelo");
-		digitalWrite(LED_PIN, HIGH);
-		while(true) delay(100);
-	}
+	bool sdCardInitialized = false;
 
-	if(SD.cardType() != CARD_SDHC) {
-		tft.print("Nema prikljucene SD kartice");
-		digitalWrite(LED_PIN, HIGH);
-		while(true) delay(100);
+	while(!sdCardInitialized) {
+
+		if(SD.begin(SD_CS) == false) {
+			tft.print("Postavljanje kartice nije uspjelo");
+			digitalWrite(LED_PIN, HIGH);
+			delay(2000);
+			continue;
+		}
+
+		if(SD.cardType() != CARD_SDHC) {
+			tft.print("Nema prikljucene SD kartice");
+			digitalWrite(LED_PIN, HIGH);
+			delay(2000);
+			continue;
+		}
+
+		sdCardInitialized = true;
+
 	}
 
 	/* #endregion */
@@ -176,20 +235,8 @@ void setup() {
 	bme680.setConfig(bsec_config_iaq);
 	bme680.setTemperatureOffset(0.8);
 
-	loadBsecState();
-
-	bsec_virtual_sensor_t sensorList[10] = {
-		BSEC_OUTPUT_RAW_TEMPERATURE,
-		BSEC_OUTPUT_RAW_PRESSURE,
-		BSEC_OUTPUT_RAW_HUMIDITY,
-		BSEC_OUTPUT_RAW_GAS,
-		BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
-		BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,
-		BSEC_OUTPUT_IAQ,
-		BSEC_OUTPUT_STATIC_IAQ,
-		BSEC_OUTPUT_CO2_EQUIVALENT,
-		BSEC_OUTPUT_BREATH_VOC_EQUIVALENT
-	};
+	if(deepSleepAwakened) bme680.setState(bsecState);
+	else loadBsecState();
 
 	bme680.updateSubscription(sensorList, 10, BSEC_SAMPLE_RATE_LP);
 
@@ -206,6 +253,11 @@ void setup() {
 }
 
 void loop() {
+
+	if(DeepSleep::isEnabled()) {
+		DeepSleep::callLoop();
+		return;
+	}
 
 	LED::loop();
 	timeClock.loop();
@@ -304,11 +356,7 @@ void handleSwipeEvent(uint8_t swipe) {
 
 	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
 		if(swipe == SWIPE_DOWN) setDisplayMode(DISPLAY_MODE_MENU);
-		else if(swipe == SWIPE_UP) displayEnterSleepMode();
-		else if(swipe == SWIPE_LEFT) {
-			displayEnterSleepMode();
-			ESP.deepSleep(100000000);
-		}
+		else if(swipe == SWIPE_UP) DeepSleep::enable();
 	}else if(displayMode == DISPLAY_MODE_MENU) {
 		setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
 	}
@@ -319,9 +367,6 @@ void handleUserInput(uint8_t touchEvent) {
 	if(touchEvent == TOUCH_EVENT_TOUCH_DOWN) handleTouchDownEvent();
 	else if(touchEvent == TOUCH_EVENT_SWIPE) handleSwipeEvent(TouchUtils::swipe);
 }
-
-uint8_t samplePeriodMinutes = 4;
-uint8_t lastSampledMinute = 100;
 
 void saveData() {
 
@@ -350,9 +395,12 @@ void saveData() {
 
 	if(minute == lastSampledMinute) return;
 	if(minute % samplePeriodMinutes != 0) return;
-	lastSampledMinute = minute;
 
-	Log::println("Sampled");
+	if(DeepSleep::isEnabled()) {
+		if(SD.begin(SD_CS) == false || SD.cardType() != CARD_SDHC) return;
+	}
+
+	lastSampledMinute = minute;
 
 	sprintf(dataBufferMini, "/data/%02d-%02d-%d.txt", day, month, year);
 
@@ -367,6 +415,8 @@ void saveData() {
 	File file = SD.open(dataBufferMini, FILE_APPEND);
 	file.write((uint8_t*)dataBuffer, bytes);
 	file.close();
+
+	Log::println("Sampled");
 
 }
 
@@ -560,18 +610,6 @@ void setDisplayMode(uint8_t newDisplayMode) {
 
 }
 
-void displayEnterSleepMode() {
-	displayMode = DISPLAY_MODE_OFF;
-	tft.writecommand(0x10);
-	delay(5);
-}
-
-void displayWakeUp() {
-	tft.writecommand(0x11);
-	bsecDelay(120);
-	setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
-}
-
 /* #endregion */
 
 /* #region Definicije funkcija za učitavanje i spremanja stanja bsec algoritma */
@@ -730,6 +768,72 @@ void turnOffWiFi() {
 void turnOnWiFi() {}
 void turnOffWiFi() {}
 #endif
+
+/* #endregion */
+
+/* #region Definicije funkcija za deep sleep */
+
+void DeepSleep::callSetup() {
+
+	Wire.begin();
+
+	digitalWrite(TFT_CS, HIGH);
+	digitalWrite(TOUCH_CS, HIGH);
+	digitalWrite(SD_CS, HIGH);
+
+	pinMode(TOUCH_IRQ, INPUT);
+	pinMode(LED_PIN, OUTPUT);
+
+	bme680.begin(BME680_I2C_ADDR_PRIMARY, Wire);
+	bme680.setConfig(bsec_config_iaq);
+	bme680.setTemperatureOffset(0.8);
+	bme680.setState(bsecState);
+	bme680.updateSubscription(sensorList, 10, BSEC_SAMPLE_RATE_LP);
+
+}
+
+void DeepSleep::callLoop() {
+
+	if(bme680.run(GetTimestamp())) {
+		
+		if(shouldSaveData) saveData();
+
+		bme680.getState(bsecState);
+    uint64_t time_us = ((bme680.nextCall - GetTimestamp()) * 1000) - esp_timer_get_time();
+
+		esp_sleep_enable_ext0_wakeup(GPIO_NUM_27, LOW);
+    esp_sleep_enable_timer_wakeup(time_us);
+    esp_deep_sleep_start();
+
+	}
+
+}
+
+void DeepSleep::enable() {
+
+	if(wifiOn) return;
+
+	deepSleep = true;
+
+	displayMode == DISPLAY_MODE_OFF;
+	tft.writecommand(0x10);
+	delay(5);
+
+}
+
+void DeepSleep::disable() {
+	deepSleep = false;
+}
+
+bool DeepSleep::isEnabled() {
+	return deepSleep;
+}
+
+int64_t DeepSleep::GetTimestamp() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL));
+}
 
 /* #endregion */
 
