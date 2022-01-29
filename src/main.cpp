@@ -2,7 +2,7 @@
 #if true
 
 #define DEBUG_ME
-//#define USE_BATTERY
+//#define USE_WIFI
 
 /* #region Includes */
 
@@ -12,11 +12,7 @@
 
 #include <TFT_eSPI.h>
 #include <PCF85063A.h>
-
-#ifdef USE_BATTERY
 #include <SparkFunBQ27441.h>
-#endif
-
 #include <SD.h>
 #include <FS.h>
 #include "mbedtls/md.h"
@@ -59,8 +55,6 @@
 #define DISPLAY_MODE_OFF 0
 #define DISPLAY_MODE_AIR_QUALITY 10
 #define DISPLAY_MODE_MENU 20
-#define DISPLAY_MODE_TIME_CLOCK 30
-#define DISPLAY_MODE_BATTERY 31
 
 /* #endregion */
 
@@ -73,23 +67,31 @@ uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 
 TFT_eSPI tft;
 PCF85063A rtc;
-#ifdef USE_BATTERY
 BQ27441 battery;
-#endif
 
 /* #region Deklaracije funkcija */
 
 uint64_t getTime();
 
-void display();
 void setTime();
+void syncTime();
+
+void setDisplayMode(uint8_t newDisplayMode);
+void displayEnterSleepMode();
+void displayWakeUp();
 
 void displayAirQualitiy();
 void displayTimeClock();
+void displayMenu();
+
 void saveData();
+void handleUserInput(uint8_t touchEvent);
 
 void loadBsecState();
 void saveBsecState();
+
+void turnOnWiFi();
+void turnOffWiFi();
 
 /* #endregion */
 
@@ -98,7 +100,11 @@ void saveBsecState();
 uint8_t displayMode = DISPLAY_MODE_AIR_QUALITY;
 char dataBuffer[256];
 char dataBufferMini[32];
+
 bool shouldSaveData = false;
+bool wifiOn = false;
+
+bool deepSleep = false;
 
 Timer timeClock(displayTimeClock);
 
@@ -145,7 +151,6 @@ void setup() {
 
 	/* #region Battery */
 
-	#ifdef USE_BATTERY
 	Log::println("Init battery");
 	battery.begin();
 
@@ -160,7 +165,6 @@ void setup() {
 	}else{
 		Log::println("Using existing gauge config");
 	}
-	#endif
 
 	/* #endregion */
 
@@ -207,9 +211,7 @@ void loop() {
 	timeClock.loop();
 
 	uint8_t touchEvent = TouchUtils::update();
-	if(touchEvent == TOUCH_EVENT_TOUCH_DOWN) {
-		if(TouchUtils::touchInside(32, 133, iconWidth, iconHeight)) saveBsecState();
-	}
+	handleUserInput(touchEvent);
 
 	bool newData = bme680.run();
 	if(newData) {
@@ -218,30 +220,20 @@ void loop() {
 	}
 
 	#ifdef DEBUG
-	if(newData) {
+	if(true && newData) {
 		
 		Serial.println(F("_________________________________"));
 
 		Serial.printf("temp=%.1f, press=%.2f, hum=%.0f, gasResistance=%.1f\n", bme680.temperature, bme680.pressure / 100, bme680.humidity, bme680.gasResistance / 1000);
 		Serial.printf("iaq=%.0f, siaq=%.0f, bvoc=%.0f, co2=%.0f, [%d]\n", bme680.iaq, bme680.staticIaq, bme680.breathVocEquivalent, bme680.co2Equivalent, bme680.iaqAccuracy);
 		
-		#ifdef USE_BATTERY
-
 		Serial.printf("soc=%d %c\n", battery.soc(), '%');
-		Serial.printf("voltage=%d mV\n", battery.voltage());
+		Serial.printf("voltage=%.0f V\n", battery.voltage() / 1000.0);
 		Serial.printf("current=%d mA, maxCurrent=%d mA\n", battery.current(AVG), battery.current(MAX));
-		Serial.printf("power=%d mW\n", battery.power());
 
-		Serial.printf("capacity design=%d\n", battery.capacity(DESIGN));
 		Serial.printf("remain=%d, full=%d\n", battery.capacity(REMAIN), battery.capacity(FULL));
 		Serial.printf("avail=%d, avail_full=%d\n", battery.capacity(AVAIL), battery.capacity(AVAIL_FULL));
-		Serial.printf("remain_f=%d, remain_uf=%d\n", battery.capacity(REMAIN_F), battery.capacity(REMAIN_UF));
-		Serial.printf("full_f=%d, full_uf=%d\n", battery.capacity(FULL_F), battery.capacity(FULL_UF));
-
-		Serial.printf("temp=%d, internalTemp=%d\n", battery.temperature(BATTERY), battery.temperature(INTERNAL_TEMP));
 		Serial.printf("hp=%d %c\n", battery.soh(), '%');
-
-		#endif
 
 	}else{
 		
@@ -271,11 +263,116 @@ void loop() {
 
 /* #endregion */
 
-/* #region Definicije glavnih funkcija */
+/* #region Definicije osnovnih funkcija */
+
+void bsecDelay(uint32_t period) {
+  uint64_t start = millis();
+	while(millis() - start < period) {
+		bme680.run();
+		delay(2);
+	}
+}
 
 uint64_t getTime() {
 	return bme680.getTimeMs();
 }
+
+void handleTouchDownEvent() {
+
+	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
+
+		if(TouchUtils::touchInside(32, 133, iconWidth, iconHeight)) saveBsecState();
+
+	}else if(displayMode == DISPLAY_MODE_MENU) {
+
+		if(TouchUtils::touchInside(20, 20, 140, 32)) {
+			if(wifiOn) turnOffWiFi();
+			else turnOnWiFi();
+			displayMenu();
+		}else if(TouchUtils::touchInside(20, 72, 140, 32)) {
+			shouldSaveData = !shouldSaveData;
+			displayMenu();
+		}else if(TouchUtils::touchInside(20, 124, 140, 32)) {
+			if(wifiOn) syncTime();
+		}
+
+	}
+
+}
+
+void handleSwipeEvent(uint8_t swipe) {
+
+	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
+		if(swipe == SWIPE_DOWN) setDisplayMode(DISPLAY_MODE_MENU);
+		else if(swipe == SWIPE_UP) displayEnterSleepMode();
+		else if(swipe == SWIPE_LEFT) {
+			displayEnterSleepMode();
+			ESP.deepSleep(100000000);
+		}
+	}else if(displayMode == DISPLAY_MODE_MENU) {
+		setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
+	}
+
+}
+
+void handleUserInput(uint8_t touchEvent) {
+	if(touchEvent == TOUCH_EVENT_TOUCH_DOWN) handleTouchDownEvent();
+	else if(touchEvent == TOUCH_EVENT_SWIPE) handleSwipeEvent(TouchUtils::swipe);
+}
+
+uint8_t samplePeriodMinutes = 4;
+uint8_t lastSampledMinute = 100;
+
+void saveData() {
+
+	uint8_t hour, minute;
+	uint8_t day, month;
+	uint16_t year;
+
+	/* #region get time */
+	tm time;
+	if(getLocalTime(&time)) {
+		hour = time.tm_hour;
+		minute = time.tm_min;
+		day = time.tm_mday;
+		month = time.tm_mon + 1;
+		year = time.tm_year + 1900;
+	}else{
+		LED::start(LED_OUTPUT_ERROR);
+		setTime();
+		hour = rtc.getHour();
+		minute = rtc.getMinute();
+		day = rtc.getDay();
+		month = rtc.getMonth();
+		year = rtc.getYear();
+	}
+	/* #endregion */
+
+	if(minute == lastSampledMinute) return;
+	if(minute % samplePeriodMinutes != 0) return;
+	lastSampledMinute = minute;
+
+	Log::println("Sampled");
+
+	sprintf(dataBufferMini, "/data/%02d-%02d-%d.txt", day, month, year);
+
+	int16_t bytes = sprintf(dataBuffer, "%02d:%02d,%.1f,%.2f,%.0f,%.1f,%.0f,%.0f,%.0f,%.0f,%d\n",
+		hour, minute,
+		bme680.temperature, bme680.pressure / 100, bme680.humidity, bme680.gasResistance / 1000,
+		bme680.iaq, bme680.staticIaq, bme680.breathVocEquivalent, bme680.co2Equivalent, bme680.iaqAccuracy
+	);
+
+	if(bytes <= 0) return;
+
+	File file = SD.open(dataBufferMini, FILE_APPEND);
+	file.write((uint8_t*)dataBuffer, bytes);
+	file.close();
+
+}
+
+/* #endregion */
+
+/* #region Definicije vremenskih funkcija  */
 
 void setTime() {
 
@@ -307,6 +404,25 @@ void setTime() {
 	#endif
 	 
 }
+
+void syncTime() {
+
+	configTime(3600, 3600, "hr.pool.ntp.org");
+
+	tm time;
+	if(getLocalTime(&time)) {
+		LED::start(LED_OUTPUT_SUCCESS);
+		rtc.setDate(time.tm_wday, time.tm_mday, time.tm_mon + 1, time.tm_year + 1900);
+		rtc.setTime(time.tm_hour, time.tm_min, time.tm_sec);
+	}else{
+		LED::start(LED_OUTPUT_ERROR);
+	}
+
+}
+
+/* #endregion */
+
+/* #region Definicije funkcija za prikaz */
 
 bool shouldRenderIcons = true;
 
@@ -359,7 +475,7 @@ void displayAirQualitiy() {
 	tft.drawString(dataBuffer, 160, 199);
 	
 	//sprintf(dataBuffer, "%.0f ppm", bme680.breathVocEquivalent);
-	sprintf(dataBuffer, "%.1f Ohm", bme680.gasResistance / 1000);
+	sprintf(dataBuffer, "%.1f KOhm", bme680.gasResistance / 1000);
 	tft.drawString(dataBuffer, 256, 199);
 
 	tft.setTextDatum(TL_DATUM);
@@ -370,92 +486,90 @@ void displayAirQualitiy() {
 
 void displayTimeClock() {
 
+	if(displayMode != DISPLAY_MODE_AIR_QUALITY) return;
+
 	uint8_t hour, minute, second;
-	uint8_t day, month;
-	uint16_t year;
+	//uint8_t day, month;
+	//uint16_t year;
 
 	tm time;
 	if(getLocalTime(&time)) {
 		hour = time.tm_hour;
 		minute = time.tm_min;
 		second = time.tm_sec;
-		day = time.tm_mday;
-		month = time.tm_mon + 1;
-		year = time.tm_year + 1900;
+		//day = time.tm_mday;
+		//month = time.tm_mon + 1;
+		//year = time.tm_year + 1900;
+	}else{
+		LED::start(LED_OUTPUT_ERROR);
+		return;
 	}
 
 	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
 
-		tft.fillRect(0, 0, 68, 22, TFT_WHITE);
-		tft.fillRect(266, 0, 54, 22, TFT_WHITE);
+		//tft.fillRect(0, 0, 68, 22, TFT_WHITE);
+		//tft.fillRect(266, 0, 54, 22, TFT_WHITE);
+		tft.fillRect(0, 0, 320, 22, TFT_WHITE);
 
 		tft.setTextColor(TFT_BLACK);
 		tft.setTextDatum(TL_DATUM);
 		tft.setTextFont(2);
 		tft.setTextSize(1);
 
-		sprintf(dataBuffer, "%02d:%02d:%02d", hour, minute, second);
+		uint16_t soc = battery.soc();
+		uint16_t voltage = battery.voltage();
+		int16_t current = -battery.current();
+		uint16_t remain = battery.capacity(REMAIN);
+		uint16_t avail = battery.capacity(AVAIL);
+
+		sprintf(dataBuffer, "%02d:%02d:%02d, %d%c, %.1fV, %dmA, %d/%dmAh", hour, minute, second, soc, '%', voltage / 1000.0, current, remain, avail);
 		tft.drawString(dataBuffer, 6, 4);
-
-		#ifdef USE_BATTERY
-		tft.setTextDatum(TR_DATUM);
-		sprintf(dataBuffer, "%d %c", battery.soc(), '%');
-		tft.drawString(dataBuffer, 314, 4);
-		#endif
-
 
 	}
 
 }
 
-uint8_t samplePeriodMinutes = 4;
-uint8_t lastSampledMinute = 100;
+void displayMenu() {
 
-void saveData() {
+	tft.setTextFont(2);
+	tft.setTextSize(1);
+	tft.setTextDatum(CC_DATUM);
 
-	uint8_t hour, minute;
-	uint8_t day, month;
-	uint16_t year;
+	tft.drawRoundRect(20, 20, 140, 32, 6, wifiOn ? TFT_GREEN : TFT_RED);
+	tft.drawString("WiFi", 90, 36);
 
-	/* #region get time */
-	tm time;
-	if(getLocalTime(&time)) {
-		hour = time.tm_hour;
-		minute = time.tm_min;
-		day = time.tm_mday;
-		month = time.tm_mon + 1;
-		year = time.tm_year + 1900;
-	}else{
-		LED::start(LED_OUTPUT_ERROR);
-		setTime();
-		hour = rtc.getHour();
-		minute = rtc.getMinute();
-		day = rtc.getDay();
-		month = rtc.getMonth();
-		year = rtc.getYear();
+	tft.drawRoundRect(20, 72, 140, 32, 6, shouldSaveData ? TFT_GREEN : TFT_RED);
+	tft.drawString("Spremanje", 90, 88);
+
+	tft.drawRoundRect(20, 124, 140, 32, 6, wifiOn ? TFT_GREEN : TFT_RED);
+	tft.drawString("Sinkroniziraj sat", 90, 140);
+	
+}
+
+void setDisplayMode(uint8_t newDisplayMode) {
+
+	displayMode = newDisplayMode;
+	tft.fillScreen(TFT_WHITE);
+
+	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
+		shouldRenderIcons = true;
+		displayAirQualitiy();
+	}else if(displayMode == DISPLAY_MODE_MENU) {
+		displayMenu();
 	}
-	/* #endregion */
 
-	if(minute == lastSampledMinute) return;
-	if(minute % samplePeriodMinutes != 0) return;
-	lastSampledMinute = minute;
+}
 
-	Log::println("Sampled");
+void displayEnterSleepMode() {
+	displayMode = DISPLAY_MODE_OFF;
+	tft.writecommand(0x10);
+	delay(5);
+}
 
-	sprintf(dataBufferMini, "/data/%02d-%02d-%d.txt", day, month, year);
-
-	int16_t bytes = sprintf(dataBuffer, "%02d:%02d,%.1f,%.2f,%.0f,%.1f,%.0f,%.0f,%.0f,%.0f,%d\n",
-		hour, minute,
-		bme680.temperature, bme680.pressure / 100, bme680.humidity, bme680.gasResistance / 1000,
-		bme680.iaq, bme680.staticIaq, bme680.breathVocEquivalent, bme680.co2Equivalent, bme680.iaqAccuracy
-	);
-
-	if(bytes <= 0) return;
-
-	File file = SD.open(dataBufferMini, FILE_APPEND);
-	file.write((uint8_t*)dataBuffer, bytes);
-	file.close();
-
+void displayWakeUp() {
+	tft.writecommand(0x11);
+	bsecDelay(120);
+	setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
 }
 
 /* #endregion */
@@ -593,6 +707,29 @@ void saveBsecState() {
 	}
 
 }
+
+/* #endregion */
+
+/* #region Definicije funkcija za WiFi */
+
+#ifdef USE_WIFI
+
+void turnOnWiFi() {
+	wifiOn = true;
+	WiFi.disconnect(true);
+	WiFi.begin("WLAN_18E1D0", "R7gaQ3P25Nf8");
+}
+
+void turnOffWiFi() {
+	wifiOn = false;
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
+#else
+void turnOnWiFi() {}
+void turnOffWiFi() {}
+#endif
 
 /* #endregion */
 

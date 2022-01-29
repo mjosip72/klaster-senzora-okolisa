@@ -88,6 +88,12 @@ void _loop() {
       drawImageSD(N, N, name.c_str());
     }
 
+    else if(cmd == "writecommand") {
+      tft.writecommand(N);
+    }else if(cmd == "writedata") {
+      tft.writedata(N);
+    }
+
     while(Serial.read() != '\n') delay(2);
 
   }
