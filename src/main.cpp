@@ -156,6 +156,7 @@ void setup() {
 	Log::println("\nKlaster senzora okolisa\nPowered by: Croduino Nova32 (ESP32) - e-radionica\n");
 
 	Wire.begin();
+	LED::begin(LED_PIN);
 
 	/* #region TFT, SD */
 
@@ -243,7 +244,6 @@ void setup() {
 	/* #endregion */
 
 	TouchUtils::begin(TOUCH_IRQ);
-	LED::begin(LED_PIN);
 	setTime();
 
 	timeClock.repeat(1000);
@@ -488,6 +488,17 @@ void syncTime() {
 	}else{
 		LED::start(LED_OUTPUT_ERROR);
 	}
+
+	#ifdef DEBUG
+	tm timeinfo;
+  if(getLocalTime(&timeinfo)) {
+    rtc.readTime();
+    Serial.printf("%d.%d.%d. %d:%d:%d\n", rtc.getDay(), rtc.getMonth(), rtc.getYear(), rtc.getHour(), rtc.getMinute(), rtc.getSecond());
+    Serial.printf("%d.%d.%d. %d:%d:%d\n", timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  }else{
+		Log::println("Failed to get time");
+	}
+	#endif
 
 }
 
