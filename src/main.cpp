@@ -77,6 +77,7 @@ bsec_virtual_sensor_t sensorList[10] = {
 
 Bsec bme680;
 RTC_DATA_ATTR uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
+RTC_DATA_ATTR int64_t bme680_nextCall;
 
 TFT_eSPI tft;
 PCF85063A rtc;
@@ -94,6 +95,7 @@ namespace DeepSleep {
 	RTC_DATA_ATTR bool deepSleep = false;
 	RTC_DATA_ATTR bool shortNap = false;
 	RTC_DATA_ATTR bool lastNap = false;
+	int64_t offsetTime;
 
 	void enable();
 	void disable();
@@ -235,6 +237,7 @@ void setup() {
 	Log::println("Init Bme680");
 
 	bme680.begin(BME680_I2C_ADDR_PRIMARY, Wire);
+	if(deepSleepAwakened) bme680.nextCall = bme680_nextCall;
 	bme680.setConfig(bsec_config_iaq);
 	bme680.setTemperatureOffset(0.8);
 
@@ -738,12 +741,14 @@ void DeepSleep::callSetup() {
 	pinMode(LED_PIN, OUTPUT);
 
 	bme680.begin(BME680_I2C_ADDR_PRIMARY, Wire);
+	bme680.nextCall = bme680_nextCall;
 	bme680.setConfig(bsec_config_iaq);
 	bme680.setTemperatureOffset(0.8);
 	bme680.setState(bsecState);
 	bme680.updateSubscription(sensorList, 10, BSEC_SAMPLE_RATE_LP);
 
 	Log::print("deep setup done "); Log::println(getTimestamp());
+	offsetTime = esp_timer_get_time();
 
 }
 
@@ -751,6 +756,9 @@ void DeepSleep::callLoop() {
 
 	int64_t ts = getTimestamp();
 	int64_t __nc = bme680.nextCall;
+
+	int64_t t1 = esp_timer_get_time();
+
 	if(bme680.run(ts)) {
 		Log::print("new data "); Log::println(ts);
 		Log::print("called at "); Log::println(__nc);
@@ -758,10 +766,12 @@ void DeepSleep::callLoop() {
 		if(shouldSaveData) saveData();
 
 		bme680.getState(bsecState);
+		bme680_nextCall = bme680.nextCall;
+		offsetTime += esp_timer_get_time() - t1;
 
 		Log::print("next call "); Log::println(bme680.nextCall);
 		Log::print("now "); Log::println(getTimestamp());
-		Log::print("esp timer "); Log::println(esp_timer_get_time());
+		Log::print("offset time "); Log::println(offsetTime);
 
 		if(lastNap) {
 			Log::println("last nap");
@@ -776,7 +786,7 @@ void DeepSleep::callLoop() {
     	esp_deep_sleep_start();
 		}
 
-    uint64_t time_us = ((bme680.nextCall - getTimestamp()) * 1000) - esp_timer_get_time();
+    uint64_t time_us = ((bme680.nextCall - getTimestamp()) * 1000) - offsetTime - 10000;
 		Log::print("deep sleep for "); Log::println(time_us);
 
 		esp_sleep_enable_ext0_wakeup(GPIO_NUM_27, LOW);
