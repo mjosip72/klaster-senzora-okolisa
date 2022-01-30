@@ -87,9 +87,6 @@ BQ27441 battery;
 int64_t getTimestamp();
 uint64_t getTime();
 
-void setTime();
-void syncTime();
-
 void setDisplayMode(uint8_t newDisplayMode);
 
 namespace DeepSleep {
@@ -244,10 +241,7 @@ void setup() {
 	/* #endregion */
 
 	TouchUtils::begin(TOUCH_IRQ);
-	setTime();
-
 	timeClock.repeat(1000);
-
 	Log::println("Init done");
 
 }
@@ -366,7 +360,7 @@ void handleTouchDownEvent() {
 			shouldSaveData = !shouldSaveData;
 			displayMenu();
 		}else if(TouchUtils::touchInside(20, 124, 140, 32)) {
-			if(wifiOn) syncTime();
+			//if(wifiOn) syncTime();
 		}
 
 	}
@@ -395,24 +389,12 @@ void saveData() {
 	uint8_t day, month;
 	uint16_t year;
 
-	/* #region get time */
-	tm time;
-	if(getLocalTime(&time)) {
-		hour = time.tm_hour;
-		minute = time.tm_min;
-		day = time.tm_mday;
-		month = time.tm_mon + 1;
-		year = time.tm_year + 1900;
-	}else{
-		LED::start(LED_OUTPUT_ERROR);
-		setTime();
-		hour = rtc.getHour();
-		minute = rtc.getMinute();
-		day = rtc.getDay();
-		month = rtc.getMonth();
-		year = rtc.getYear();
-	}
-	/* #endregion */
+	rtc.readTime();
+	hour = rtc.getHour();
+	minute = rtc.getMinute();
+	day = rtc.getDay();
+	month = rtc.getMonth();
+	year = rtc.getYear();
 
 	if(minute == lastSampledMinute) return;
 	if(minute % samplePeriodMinutes != 0) return;
@@ -438,67 +420,6 @@ void saveData() {
 	file.close();
 
 	Log::println("Sampled");
-
-}
-
-/* #endregion */
-
-/* #region Definicije vremenskih funkcija  */
-
-void setTime() {
-
-	rtc.readTime();
-
-	tm time = {0};
-	time.tm_year = rtc.getYear() - 1900;
-  time.tm_mon = rtc.getMonth() - 1;
-  time.tm_mday = rtc.getDay();
-  time.tm_hour = rtc.getHour();
-  time.tm_min = rtc.getMinute();
-  time.tm_sec = rtc.getSecond();
-
-	time_t epoch = mktime(&time);
-	timeval tv;
-	tv.tv_sec = epoch;
-	tv.tv_usec = 0;
-	settimeofday(&tv, NULL);
-
-	#ifdef DEBUG
-	tm timeinfo;
-  if(getLocalTime(&timeinfo)) {
-    rtc.readTime();
-    Serial.printf("%d.%d.%d. %d:%d:%d\n", rtc.getDay(), rtc.getMonth(), rtc.getYear(), rtc.getHour(), rtc.getMinute(), rtc.getSecond());
-    Serial.printf("%d.%d.%d. %d:%d:%d\n", timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-  }else{
-		Log::println("Failed to set time");
-	}
-	#endif
-	 
-}
-
-void syncTime() {
-
-	configTime(3600, 3600, "hr.pool.ntp.org");
-
-	tm time;
-	if(getLocalTime(&time)) {
-		LED::start(LED_OUTPUT_SUCCESS);
-		rtc.setDate(time.tm_wday, time.tm_mday, time.tm_mon + 1, time.tm_year + 1900);
-		rtc.setTime(time.tm_hour, time.tm_min, time.tm_sec);
-	}else{
-		LED::start(LED_OUTPUT_ERROR);
-	}
-
-	#ifdef DEBUG
-	tm timeinfo;
-  if(getLocalTime(&timeinfo)) {
-    rtc.readTime();
-    Serial.printf("%d.%d.%d. %d:%d:%d\n", rtc.getDay(), rtc.getMonth(), rtc.getYear(), rtc.getHour(), rtc.getMinute(), rtc.getSecond());
-    Serial.printf("%d.%d.%d. %d:%d:%d\n", timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-  }else{
-		Log::println("Failed to get time");
-	}
-	#endif
 
 }
 
@@ -574,18 +495,10 @@ void displayTimeClock() {
 	//uint8_t day, month;
 	//uint16_t year;
 
-	tm time;
-	if(getLocalTime(&time)) {
-		hour = time.tm_hour;
-		minute = time.tm_min;
-		second = time.tm_sec;
-		//day = time.tm_mday;
-		//month = time.tm_mon + 1;
-		//year = time.tm_year + 1900;
-	}else{
-		LED::start(LED_OUTPUT_ERROR);
-		return;
-	}
+	rtc.readTime();
+	hour = rtc.getHour();
+	minute = rtc.getMinute();
+	second = rtc.getSecond();
 
 	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
 

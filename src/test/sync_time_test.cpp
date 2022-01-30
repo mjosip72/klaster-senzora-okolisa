@@ -3,7 +3,6 @@
 
 #include "Test.h"
 
-#include <WiFi.h>
 #include <time.h>
 #include <PCF85063A.h>
 
@@ -35,18 +34,13 @@ void setTime() {
 	tv.tv_sec = epoch;
 	tv.tv_usec = 0;
 	settimeofday(&tv, NULL);
-
-	#ifdef DEBUG
-	tm timeinfo;
-  if(getLocalTime(&timeinfo)) {
-    rtc.readTime();
-    Serial.printf("%d.%d.%d. %d:%d:%d\n", rtc.getDay(), rtc.getMonth(), rtc.getYear(), rtc.getHour(), rtc.getMinute(), rtc.getSecond());
-    Serial.printf("%d.%d.%d. %d:%d:%d\n", timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-  }else{
-		Log::println("Failed to set time");
-	}
-	#endif
 	 
+}
+
+int64_t getTimestamp() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL));
 }
 
 
@@ -54,40 +48,31 @@ void _setup() {
 
   Wire.begin();
 
+  delay(2000);
+
+  rtc.readTime();
+  Serial.printf("rtc %d.%d.%d. %d:%d:%d\n", rtc.getDay(), rtc.getMonth(), rtc.getYear(), rtc.getHour(), rtc.getMinute(), rtc.getSecond());
+
+  Serial.print("timestamp = "); Serial.print(getTimestamp()); Serial.print(", millis = "); Serial.println(millis());
+
+  delay(1000);
 
   //setTime();
 
-  //connect to WiFi
-  Serial.printf("Connecting to %s ", ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print(".");
-  }
-  Serial.println(" CONNECTED");
-  
-
-
-  //init and get the time
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+ // Serial.println("TIME AFTER SET");
 
   tm timeinfo;
   if(getLocalTime(&timeinfo)) {
-    
-    Serial.printf("%d %d.%d.%d. %d:%d:%d\n", timeinfo.tm_wday, timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-    Serial.printf("%d %d\n", timeinfo.tm_isdst, timeinfo.tm_yday);
-
-    rtc.setDate(timeinfo.tm_wday, timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
-    rtc.setTime(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-
-    rtc.readTime();
-    Serial.printf("%d %d.%d.%d. %d:%d:%d\n", rtc.getWeekday(), rtc.getDay(), rtc.getMonth(), rtc.getYear(), rtc.getHour(), rtc.getMinute(), rtc.getSecond());
-
+    Serial.printf("esp %d %d.%d.%d. %d:%d:%d\n", timeinfo.tm_wday, timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
   }
 
-  //disconnect WiFi as it's no longer needed
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  time_t tt;
+  time(&tt);
+  Serial.print("time = "); Serial.println(tt);
+
+  Serial.print("timestamp = "); Serial.print(getTimestamp()); Serial.print(", millis = "); Serial.println(millis());
+
+  ESP.deepSleep(4000000);
 
 }
 
