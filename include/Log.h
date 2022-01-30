@@ -38,6 +38,12 @@ namespace Log {
     #endif
   }
 
+  void println(uint64_t x) {
+    #ifdef DEBUG
+    Serial.println(x);
+    #endif
+  }
+
   void println() {
     #ifdef DEBUG
     Serial.println();

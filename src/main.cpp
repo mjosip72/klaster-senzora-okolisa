@@ -1,7 +1,7 @@
 
 #if true
 
-//#define DEBUG_ME
+#define DEBUG_ME
 //#define USE_WIFI
 
 /* #region Includes */
@@ -92,6 +92,8 @@ void setDisplayMode(uint8_t newDisplayMode);
 namespace DeepSleep {
 
 	RTC_DATA_ATTR bool deepSleep = false;
+	RTC_DATA_ATTR bool shortNap = false;
+	RTC_DATA_ATTR bool lastNap = false;
 
 	void enable();
 	void disable();
@@ -136,16 +138,19 @@ void setup() {
 
 	bool deepSleepAwakened = false;
 
+	if(DeepSleep::lastNap) {
+		DeepSleep::disable();
+		deepSleepAwakened = true;
+	}
+
 	if(DeepSleep::isEnabled()) {
 
 		esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
-		if(wakeupReason == ESP_SLEEP_WAKEUP_EXT0) {
-			deepSleepAwakened = true;
-			DeepSleep::disable();
-		}else{
-			DeepSleep::callSetup();
-			return;
-		}
+
+		if(wakeupReason == ESP_SLEEP_WAKEUP_EXT0) DeepSleep::lastNap = true;
+
+		DeepSleep::callSetup();
+		return;
 
 	}
 
@@ -720,6 +725,9 @@ void turnOffWiFi() {}
 
 void DeepSleep::callSetup() {
 
+	Log::begin(115200);
+	Log::print("deep setup "); Log::println(getTimestamp());
+
 	Wire.begin();
 
 	digitalWrite(TFT_CS, HIGH);
@@ -735,16 +743,41 @@ void DeepSleep::callSetup() {
 	bme680.setState(bsecState);
 	bme680.updateSubscription(sensorList, 10, BSEC_SAMPLE_RATE_LP);
 
+	Log::print("deep setup done "); Log::println(getTimestamp());
+
 }
 
 void DeepSleep::callLoop() {
 
-	if(bme680.run(getTimestamp())) {
-		
+	int64_t ts = getTimestamp();
+	int64_t __nc = bme680.nextCall;
+	if(bme680.run(ts)) {
+		Log::print("new data "); Log::println(ts);
+		Log::print("called at "); Log::println(__nc);
+
 		if(shouldSaveData) saveData();
 
 		bme680.getState(bsecState);
+
+		Log::print("next call "); Log::println(bme680.nextCall);
+		Log::print("now "); Log::println(getTimestamp());
+		Log::print("esp timer "); Log::println(esp_timer_get_time());
+
+		if(lastNap) {
+			Log::println("last nap");
+			esp_sleep_enable_timer_wakeup(100);
+    	esp_deep_sleep_start();
+		}
+
+		if(shortNap) {
+			shortNap = false;
+			Log::println("short nap");
+			esp_sleep_enable_timer_wakeup(100);
+    	esp_deep_sleep_start();
+		}
+
     uint64_t time_us = ((bme680.nextCall - getTimestamp()) * 1000) - esp_timer_get_time();
+		Log::print("deep sleep for "); Log::println(time_us);
 
 		esp_sleep_enable_ext0_wakeup(GPIO_NUM_27, LOW);
     esp_sleep_enable_timer_wakeup(time_us);
@@ -759,6 +792,7 @@ void DeepSleep::enable() {
 	if(wifiOn) return;
 
 	deepSleep = true;
+	shortNap = true;
 
 	displayMode = DISPLAY_MODE_OFF;
 	tft.writecommand(0x10);
@@ -768,6 +802,7 @@ void DeepSleep::enable() {
 
 void DeepSleep::disable() {
 	deepSleep = false;
+	lastNap = false;
 }
 
 bool DeepSleep::isEnabled() {
