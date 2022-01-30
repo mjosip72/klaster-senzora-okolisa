@@ -815,12 +815,12 @@ void DeepSleep::callSetup() {
 
 void DeepSleep::callLoop() {
 
-	if(bme680.run(GetTimestamp())) {
+	if(bme680.run(getTimestamp())) {
 		
 		if(shouldSaveData) saveData();
 
 		bme680.getState(bsecState);
-    uint64_t time_us = ((bme680.nextCall - GetTimestamp()) * 1000) - esp_timer_get_time();
+    uint64_t time_us = ((bme680.nextCall - getTimestamp()) * 1000) - esp_timer_get_time();
 
 		esp_sleep_enable_ext0_wakeup(GPIO_NUM_27, LOW);
     esp_sleep_enable_timer_wakeup(time_us);
