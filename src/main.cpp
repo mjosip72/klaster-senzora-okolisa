@@ -1,7 +1,7 @@
 
 #if true
 
-#define DEBUG_ME
+//#define DEBUG_ME
 //#define USE_WIFI
 
 /* #region Includes */
@@ -84,6 +84,7 @@ BQ27441 battery;
 
 /* #region Deklaracije funkcija */
 
+int64_t getTimestamp();
 uint64_t getTime();
 
 void setTime();
@@ -102,7 +103,6 @@ namespace DeepSleep {
 	void callLoop();
 
 	bool isEnabled();
-	int64_t GetTimestamp();
 
 }
 
@@ -173,7 +173,7 @@ void setup() {
 	if(deepSleepAwakened) {
 		tft.writecommand(0x11);
 		delay(120);
-		displayMode == DISPLAY_MODE_AIR_QUALITY;
+		displayMode = DISPLAY_MODE_AIR_QUALITY;
 	}
 
 	tft.setRotation(1);
@@ -265,10 +265,25 @@ void loop() {
 	uint8_t touchEvent = TouchUtils::update();
 	handleUserInput(touchEvent);
 
-	bool newData = bme680.run();
+	bool newData = bme680.run(getTimestamp());
 	if(newData) {
 		if(displayMode == DISPLAY_MODE_AIR_QUALITY) displayAirQualitiy();
 		if(shouldSaveData) saveData();
+	}else{
+				
+		bsec_library_return_t status = bme680.status; // bsec_datatypes.h, line 291
+    int8_t bme680Status = bme680.bme680Status; // bme680_defs.h, line 122
+  
+    if(status != BSEC_OK) {
+      if(status < BSEC_OK) LED::start(LED_OUTPUT_ERROR);
+      else LED::start(LED_OUTPUT_WARNING);
+    }
+
+    if(bme680Status != BME680_OK) {
+      if(bme680Status < BME680_OK) LED::start(LED_OUTPUT_ERROR);
+      else LED::start(LED_OUTPUT_WARNING);
+    }
+
 	}
 
 	#ifdef DEBUG
@@ -316,6 +331,12 @@ void loop() {
 /* #endregion */
 
 /* #region Definicije osnovnih funkcija */
+
+int64_t getTimestamp() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL));
+}
 
 void bsecDelay(uint32_t period) {
   uint64_t start = millis();
@@ -815,7 +836,7 @@ void DeepSleep::enable() {
 
 	deepSleep = true;
 
-	displayMode == DISPLAY_MODE_OFF;
+	displayMode = DISPLAY_MODE_OFF;
 	tft.writecommand(0x10);
 	delay(5);
 
@@ -827,12 +848,6 @@ void DeepSleep::disable() {
 
 bool DeepSleep::isEnabled() {
 	return deepSleep;
-}
-
-int64_t DeepSleep::GetTimestamp() {
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return (tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL));
 }
 
 /* #endregion */
