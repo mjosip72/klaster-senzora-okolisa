@@ -1,7 +1,7 @@
 
 #if true
 
-#define DEBUG_ME
+//#define DEBUG_ME
 //#define USE_WIFI
 
 /* #region Includes */
@@ -75,7 +75,7 @@ bsec_virtual_sensor_t sensorList[10] = {
 	BSEC_OUTPUT_BREATH_VOC_EQUIVALENT
 };
 
-Bsec bme680;
+RTC_DATA_ATTR Bsec bme680;
 RTC_DATA_ATTR uint8_t bsecState[BSEC_MAX_STATE_BLOB_SIZE] = {0};
 RTC_DATA_ATTR int64_t bme680_nextCall;
 
@@ -741,7 +741,7 @@ void DeepSleep::callSetup() {
 	pinMode(LED_PIN, OUTPUT);
 
 	bme680.begin(BME680_I2C_ADDR_PRIMARY, Wire);
-	bme680.nextCall = bme680_nextCall;
+	//bme680.nextCall = bme680_nextCall;
 	bme680.setConfig(bsec_config_iaq);
 	bme680.setTemperatureOffset(0.8);
 	bme680.setState(bsecState);
@@ -766,7 +766,7 @@ void DeepSleep::callLoop() {
 		if(shouldSaveData) saveData();
 
 		bme680.getState(bsecState);
-		bme680_nextCall = bme680.nextCall;
+		//bme680_nextCall = bme680.nextCall;
 		offsetTime += esp_timer_get_time() - t1;
 
 		Log::print("next call "); Log::println(bme680.nextCall);
