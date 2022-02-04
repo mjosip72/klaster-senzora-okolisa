@@ -16,17 +16,14 @@ struct pms5003_data {
   uint16_t start_bytes;
   uint16_t frame_length;
 
-  // ug/m3
-  uint16_t pm10_standard; // PM1.0
-  uint16_t pm25_standard; // PM2.5
-  uint16_t pm100_standard; // PM10
+  uint16_t pm10_standard;
+  uint16_t pm25_standard;
+  uint16_t pm100_standard;
 
-  // ug/m3
-  uint16_t pm10_env; // PM1.0
-  uint16_t pm25_env; // PM2.5
-  uint16_t pm100_env; // PM100
+  uint16_t pm10_env;
+  uint16_t pm25_env;
+  uint16_t pm100_env;
   
-  // 0.1L
   uint16_t particles_03um;
   uint16_t particles_05um;
   uint16_t particles_10um;
@@ -37,49 +34,43 @@ struct pms5003_data {
   uint16_t reserved;
   uint16_t checksum;
 
-};
+} pms5003;
 
-class PMS5003 {
+namespace PMS5003 {
 
-    private:
-    uint8_t rx_pin;
-    uint8_t tx_pin;
+  HardwareSerial* serial;
 
-    public:
+  int8_t rxPin = -1;
+  int8_t tyPin = -1;
 
-    pms5003_data data;
+  void init(uint8_t _rxPin, uint8_t _tyPin) {
+    rxPin = _rxPin;
+    tyPin = _tyPin;
+  }
 
-    PMS5003(uint8_t rx, uint8_t tx) {
-      rx_pin = rx;
-      tx_pin = tx;
+  void begin(HardwareSerial* _serial) {
+    serial = _serial;
+    serial->begin(9600, SERIAL_8N1, rxPin, tyPin);
+  }
+
+  void end() {
+    serial->end();
+  }
+
+  bool run() {
+
+    if(serial->available() == 0) return false;
+
+    if(serial->peek() != 0x42) {
+        serial->read();
+        return false;
     }
 
-    void begin() {
-      Serial1.begin(9600, SERIAL_8N1, rx_pin, tx_pin);
-    }
-
-    void end() {
-      Serial1.end();
-    }
-
-    int8_t run();
-
-};
-
-int8_t PMS5003::run() {
-
-    if(Serial1.available() == 0) return PMS5003_WAIT;
-
-    if(Serial1.peek() != 0x42) {
-        Serial1.read();
-        return PMS5003_START_BYTE_MISMATCH;
-    }
-
-    if(Serial1.available() < 32) return PMS5003_WAIT;
+    if(serial->available() < 32) return false;
 
     uint8_t buffer[32];
     uint16_t sum = 0;
-    Serial1.readBytes(buffer, 32);
+    serial->readBytes(buffer, 32);
 
     for(uint8_t i = 0; i < 30; i++) sum += buffer[i];
 
@@ -89,12 +80,14 @@ int8_t PMS5003::run() {
       buffer[i + 1] = t;
     }
 
-    memcpy(&data, buffer, 32);
+    memcpy(&pms5003, buffer, 32);
 
-    if(data.start_bytes != 0x424d) return PMS5003_TRANSFER_ERROR;
-    if(data.frame_length != 28) return PMS5003_TRANSFER_ERROR;
-    if(data.checksum != sum) return PMS5003_CHECKSUM_MISMATCH;
+    if(pms5003.start_bytes != 0x424d) return false;
+    if(pms5003.frame_length != 28) return false;
+    if(pms5003.checksum != sum) return false;
 
-    return PMS5003_DATA_READY;
+    return true;
+
+  }
 
 }
