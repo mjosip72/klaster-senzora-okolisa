@@ -3,12 +3,6 @@
 
 #include <Arduino.h>
 
-#define PMS5003_START_BYTE_MISMATCH -1
-#define PMS5003_TRANSFER_ERROR -2
-#define PMS5003_CHECKSUM_MISMATCH -3
-#define PMS5003_WAIT 0
-#define PMS5003_DATA_READY 1
-
 // https://e-radionica.com/productdata/PMS5003.pdf
 
 struct pms5003_data {
@@ -41,23 +35,29 @@ namespace PMS5003 {
   HardwareSerial* serial;
 
   int8_t rxPin = -1;
-  int8_t tyPin = -1;
+  int8_t txPin = -1;
+  
+  bool running = false;
 
-  void init(uint8_t _rxPin, uint8_t _tyPin) {
+  void init(uint8_t _rxPin, uint8_t _txPin) {
     rxPin = _rxPin;
-    tyPin = _tyPin;
+    txPin = _txPin;
   }
 
   void begin(HardwareSerial* _serial) {
     serial = _serial;
-    serial->begin(9600, SERIAL_8N1, rxPin, tyPin);
+    serial->begin(9600, SERIAL_8N1, rxPin, txPin);
+    running = true;
   }
 
   void end() {
     serial->end();
+    running = false;
   }
 
   bool run() {
+
+    if(!running) return false;
 
     if(serial->available() == 0) return false;
 

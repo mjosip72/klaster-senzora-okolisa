@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 // TX -> RX
-// 1  -> 17
+// 1  -> 16
 
 void setup() {
   Serial.begin(115200);

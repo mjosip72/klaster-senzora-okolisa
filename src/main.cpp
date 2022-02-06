@@ -15,19 +15,20 @@
 #include <SparkFunBQ27441.h>
 #include <SD.h>
 #include <FS.h>
-#include "mbedtls/md.h"
+#include <mbedtls/md.h>
 
 #ifdef DEBUG_ME
 #define DEBUG
 #endif
 
+#include "pms5003.h"
 #include "StringUtils.h"
 #include "LedOutput.h"
 #include "TouchUtils.h"
 #include "Timer.h"
 #include "Log.h"
 
-#include "images.h"
+//#include "images.h"
 
 /* #endregion */
 
@@ -46,14 +47,18 @@
 #define SD_CS 14
 #define LED_PIN 13
 
+#define SERIAL2_RX 16
+#define SERIAL2_TX 17
+
 /* #endregion */
 
 /* #region Defines */
 
-#define BSEC_STATE_PATH "/bsec_state.bin"
+#define BSEC_STATE_PATH "/sys/bsec_state.bin"
 
 #define DISPLAY_MODE_OFF 0
 #define DISPLAY_MODE_AIR_QUALITY 10
+#define DISPLAY_MODE_AIR_OTHER 11
 #define DISPLAY_MODE_MENU 20
 
 /* #endregion */
@@ -107,7 +112,8 @@ namespace DeepSleep {
 
 }
 
-void displayAirQualitiy();
+void displayBmeData();
+void displayPmsData();
 void displayTimeClock();
 void displayMenu();
 
@@ -124,7 +130,7 @@ void turnOffWiFi();
 
 /* #region setup, loop */
 
-RTC_DATA_ATTR uint8_t displayMode = DISPLAY_MODE_AIR_QUALITY;
+RTC_DATA_ATTR uint8_t displayMode = DISPLAY_MODE_OFF;
 char dataBuffer[256];
 char dataBufferMini[32];
 
@@ -178,7 +184,7 @@ void setup() {
 	if(deepSleepAwakened) {
 		tft.writecommand(0x11);
 		delay(120);
-		displayMode = DISPLAY_MODE_AIR_QUALITY;
+		//displayMode = DISPLAY_MODE_AIR_QUALITY;
 	}
 
 	tft.setRotation(1);
@@ -249,7 +255,10 @@ void setup() {
 	/* #endregion */
 
 	TouchUtils::begin(TOUCH_IRQ);
-	timeClock.repeat(1000);
+	PMS5003::init(SERIAL2_RX, SERIAL2_TX);
+	timeClock.repeat(800);
+
+	setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
 	Log::println("Init done");
 
 }
@@ -267,9 +276,12 @@ void loop() {
 	uint8_t touchEvent = TouchUtils::update();
 	handleUserInput(touchEvent);
 
+	bool pmsNewData = PMS5003::run();
+	if(pmsNewData) displayPmsData();
+
 	bool newData = bme680.run(getTimestamp());
 	if(newData) {
-		if(displayMode == DISPLAY_MODE_AIR_QUALITY) displayAirQualitiy();
+		displayBmeData();
 		if(shouldSaveData) saveData();
 	}else{
 				
@@ -356,7 +368,7 @@ void handleTouchDownEvent() {
 
 	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
 
-		if(TouchUtils::touchInside(32, 133, iconWidth, iconHeight)) saveBsecState();
+		if(TouchUtils::touchInside(32, 133, 64, 64)) saveBsecState();
 
 	}else if(displayMode == DISPLAY_MODE_MENU) {
 
@@ -369,6 +381,10 @@ void handleTouchDownEvent() {
 			displayMenu();
 		}else if(TouchUtils::touchInside(20, 124, 140, 32)) {
 			//if(wifiOn) syncTime();
+		}else if(TouchUtils::touchInside(20, 176, 140, 32)) {
+			if(PMS5003::running) PMS5003::end();
+			else PMS5003::begin(&Serial2);
+			displayMenu();
 		}
 
 	}
@@ -379,8 +395,11 @@ void handleSwipeEvent(uint8_t swipe) {
 
 	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
 		if(swipe == SWIPE_DOWN) setDisplayMode(DISPLAY_MODE_MENU);
+		else if(swipe == SWIPE_LEFT) setDisplayMode(DISPLAY_MODE_AIR_OTHER);
 		else if(swipe == SWIPE_UP) DeepSleep::enable();
 	}else if(displayMode == DISPLAY_MODE_MENU) {
+		setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
+	}else if(displayMode == DISPLAY_MODE_AIR_OTHER) {
 		setDisplayMode(DISPLAY_MODE_AIR_QUALITY);
 	}
 
@@ -435,10 +454,63 @@ void saveData() {
 
 /* #region Definicije funkcija za prikaz */
 
-bool shouldRenderIcons = true;
+void drawImageSD(uint16_t x, uint16_t y, const char* name) {
+
+  if(!SD.exists(name)) return;
+  File file = SD.open(name, FILE_READ);
+
+  char sizeBuff[4];
+  file.readBytes(sizeBuff, 4);
+
+  uint16_t w = (((uint16_t)sizeBuff[0] << 8) & 0xFF00) | ((uint16_t)sizeBuff[1] & 0xFF);
+  uint16_t h = (((uint16_t)sizeBuff[2] << 8) & 0xFF00) | ((uint16_t)sizeBuff[3] & 0xFF);
+
+  char* buffer = new char[w*2];
+  for(uint16_t i = 0; i < h; i++) {
+    file.readBytes(buffer, w*2);
+    tft.pushImage(x, y + i, w, 1, (uint16_t*)buffer);
+  }
+
+  file.close();
+
+  delete[] buffer;
+
+}
+
+//bool shouldRenderBmeIcons = true;
+//bool shouldRenderPmsIcons = true;
+
+void renderIcons() {
+
+	/*
+	if(shouldRenderBmeIcons) {
+		tft.pushImage(32, 43, iconWidth, iconHeight, tempIcon);
+		tft.pushImage(128, 43, iconWidth, iconHeight, humIcon);
+		tft.pushImage(224, 43, iconWidth, iconHeight, pressIcon);
+		tft.pushImage(32, 133, iconWidth, iconHeight, gasIcon);
+		tft.pushImage(128, 133, iconWidth, iconHeight, co2Icon);
+		tft.pushImage(224, 133, iconWidth, iconHeight, vocIcon);
+		shouldRenderBmeIcons = false;
+	}*/
+
+	drawImageSD(32, 43, "/sys/temp.img");
+	drawImageSD(128, 43, "/sys/hum.img");
+	drawImageSD(224, 43, "/sys/press.img");
+	drawImageSD(32, 133, "/sys/air.img");
+
+	if(PMS5003::running) {
+		drawImageSD(128, 133, "/sys/pm10.img");
+		drawImageSD(224, 133, "/sys/pm25.img");
+	}else{
+		drawImageSD(128, 133, "/sys/pm10d.img");
+		drawImageSD(224, 133, "/sys/pm25d.img");
+	}
+
+}
 
 const char* getIaqLabel() {
-	if(bme680.iaqAccuracy < 2) return "kalibrira se...";
+	return "";
+	/*if(bme680.iaqAccuracy < 2) return "kalibrira se...";
 	float iaq = bme680.iaq;
   if(iaq <= 50) return "odlicno";
   if(iaq <= 100) return "dobro";
@@ -446,52 +518,130 @@ const char* getIaqLabel() {
   if(iaq <= 200) return "umjereno zagadjeno";
   if(iaq <= 250) return "jako zagadjeno";
   if(iaq <= 350) return "ozbiljno zagadjeno";
-  return "krajnje zagadjeno";
+  return "krajnje zagadjeno";*/
 }
 
-void displayAirQualitiy() {
+void displayBmeData() {
 
-	if(shouldRenderIcons) {
-		tft.pushImage(32, 43, iconWidth, iconHeight, tempIcon);
-		tft.pushImage(128, 43, iconWidth, iconHeight, humIcon);
-		tft.pushImage(224, 43, iconWidth, iconHeight, pressIcon);
-		tft.pushImage(32, 133, iconWidth, iconHeight, gasIcon);
-		tft.pushImage(128, 133, iconWidth, iconHeight, co2Icon);
-		tft.pushImage(224, 133, iconWidth, iconHeight, vocIcon);
-		shouldRenderIcons = false;
+	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
+
+		//renderIcons();
+
+		tft.fillRect(16, 109, 288, 16, TFT_WHITE);
+		tft.fillRect(16, 199, 96, 37, TFT_WHITE);
+
+		tft.setTextColor(TFT_BLACK);
+		tft.setTextDatum(TC_DATUM);
+		tft.setTextFont(2);
+		tft.setTextSize(1);
+
+		sprintf(dataBuffer, "%.1f C", bme680.temperature);
+		tft.drawString(dataBuffer, 64, 109);
+
+		sprintf(dataBuffer, "%.0f %c", bme680.humidity, '%');
+		tft.drawString(dataBuffer, 160, 109);
+		
+		sprintf(dataBuffer, "%.1f hPa", bme680.pressure / 100);
+		tft.drawString(dataBuffer, 256, 109);
+		
+		if(bme680.iaqAccuracy != 3) sprintf(dataBuffer, "%.0f [%d]", bme680.iaq, bme680.iaqAccuracy);
+		else sprintf(dataBuffer, "%.0f", bme680.iaq);
+		tft.drawString(dataBuffer, 64, 199);
+
+		tft.setTextDatum(TC_DATUM);
+		tft.setTextFont(1);
+
+		tft.drawString("umjereno", 64, 215);
+		tft.drawString("zagadjeno", 64, 223);
+
+	}else if(displayMode == DISPLAY_MODE_AIR_OTHER) {
+
+		tft.setTextColor(TFT_BLACK);
+		tft.setTextDatum(TL_DATUM);
+		tft.setTextFont(2);
+		tft.setTextSize(1);
+
+		tft.fillRect(40, 2, 100, 54, TFT_WHITE);
+		
+		sprintf(dataBuffer, "= %.1f kOhm", bme680.gasResistance / 1000.0);
+		tft.drawString(dataBuffer, 44, 4);
+
+		sprintf(dataBuffer, "= %.0f ppm", bme680.breathVocEquivalent);
+		tft.drawString(dataBuffer, 44, 20);
+
+		sprintf(dataBuffer, "= %.0f ppm", bme680.co2Equivalent);
+		tft.drawString(dataBuffer, 44, 36);
+
 	}
 
-	tft.fillRect(0, 107, 320, 26, TFT_WHITE);
-	tft.fillRect(0, 197, 320, 43, TFT_WHITE);
+}
 
-	tft.setTextColor(TFT_BLACK);
-	tft.setTextDatum(TC_DATUM);
-	tft.setTextFont(2);
-	tft.setTextSize(1);
+void displayPmsData() {
 
-	sprintf(dataBuffer, "%.1f C", bme680.temperature);
-	tft.drawString(dataBuffer, 64, 109);
+	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
 
-	sprintf(dataBuffer, "%.0f %c", bme680.humidity, '%');
-	tft.drawString(dataBuffer, 160, 109);
-	
-	sprintf(dataBuffer, "%.1f hPa", bme680.pressure / 100);
-	tft.drawString(dataBuffer, 256, 109);
-	
-	if(bme680.iaqAccuracy != 3) sprintf(dataBuffer, "%.0f [%d]", bme680.iaq, bme680.iaqAccuracy);
-	else sprintf(dataBuffer, "%.0f", bme680.iaq);
-	tft.drawString(dataBuffer, 64, 199);
-	
-	sprintf(dataBuffer, "%.0f ppm", bme680.co2Equivalent);
-	tft.drawString(dataBuffer, 160, 199);
-	
-	//sprintf(dataBuffer, "%.0f ppm", bme680.breathVocEquivalent);
-	sprintf(dataBuffer, "%.1f KOhm", bme680.gasResistance / 1000);
-	tft.drawString(dataBuffer, 256, 199);
+		//renderIcons();
 
-	tft.setTextDatum(TL_DATUM);
-	tft.setTextFont(1);
-	tft.drawString(getIaqLabel(), 32, 215);
+		tft.fillRect(112, 199, 193, 37, TFT_WHITE);
+
+		tft.setTextColor(TFT_BLACK);
+		tft.setTextDatum(TC_DATUM);
+		tft.setTextFont(2);
+		tft.setTextSize(1);
+
+		sprintf(dataBuffer, "%d ug\\m3", pms5003.pm10_env);
+		tft.drawString(dataBuffer, 160, 199);
+		
+		sprintf(dataBuffer, "%d ug\\m3", pms5003.pm25_env);
+		tft.drawString(dataBuffer, 256, 199);
+
+		tft.setTextDatum(TC_DATUM);
+		tft.setTextFont(1);
+
+		tft.drawString("umjereno", 160, 215);
+		tft.drawString("zagadjeno", 160, 223);
+
+		tft.drawString("umjereno", 256, 215);
+		tft.drawString("zagadjeno", 256, 223);
+
+	}else if(displayMode == DISPLAY_MODE_AIR_OTHER) {
+
+		tft.setTextColor(TFT_BLACK);
+		tft.setTextDatum(TL_DATUM);
+		tft.setTextFont(2);
+		tft.setTextSize(1);
+
+		tft.fillRect(99, 58, 150, 54, TFT_WHITE);
+		tft.fillRect(124, 114, 112, 108, TFT_WHITE);
+
+		sprintf(dataBuffer, "= %d/%d ug\\m3", pms5003.pm10_standard, pms5003.pm10_env);
+		tft.drawString(dataBuffer, 103, 60);
+
+		sprintf(dataBuffer, "= %d/%d ug\\m3", pms5003.pm25_standard, pms5003.pm25_env);
+		tft.drawString(dataBuffer, 103, 76);
+
+		sprintf(dataBuffer, "= %d/%d ug\\m3", pms5003.pm100_standard, pms5003.pm100_env);
+		tft.drawString(dataBuffer, 103, 92);
+
+		sprintf(dataBuffer, "= %d ppm", pms5003.particles_03um);
+		tft.drawString(dataBuffer, 127, 116);
+
+		sprintf(dataBuffer, "= %d ppm", pms5003.particles_05um);
+		tft.drawString(dataBuffer, 127, 132);
+
+		sprintf(dataBuffer, "= %d ppm", pms5003.particles_10um);
+		tft.drawString(dataBuffer, 127, 148);
+
+		sprintf(dataBuffer, "= %d ppm", pms5003.particles_25um);
+		tft.drawString(dataBuffer, 127, 172);
+
+		sprintf(dataBuffer, "= %d ppm", pms5003.particles_50um);
+		tft.drawString(dataBuffer, 127, 188);
+
+		sprintf(dataBuffer, "= %d ppm", pms5003.particles_100um);
+		tft.drawString(dataBuffer, 127, 204);
+
+	}
 
 }
 
@@ -534,6 +684,7 @@ void displayTimeClock() {
 
 void displayMenu() {
 
+	tft.setTextColor(TFT_BLACK);
 	tft.setTextFont(2);
 	tft.setTextSize(1);
 	tft.setTextDatum(CC_DATUM);
@@ -547,6 +698,9 @@ void displayMenu() {
 	tft.drawRoundRect(20, 124, 140, 32, 6, wifiOn ? TFT_GREEN : TFT_RED);
 	tft.drawString("Sinkroniziraj sat", 90, 140);
 	
+	tft.drawRoundRect(20, 176, 140, 32, 6, PMS5003::running ? TFT_GREEN : TFT_RED);
+	tft.drawString("PMS5003", 90, 192);
+
 }
 
 void setDisplayMode(uint8_t newDisplayMode) {
@@ -555,10 +709,35 @@ void setDisplayMode(uint8_t newDisplayMode) {
 	tft.fillScreen(TFT_WHITE);
 
 	if(displayMode == DISPLAY_MODE_AIR_QUALITY) {
-		shouldRenderIcons = true;
-		displayAirQualitiy();
+		//shouldRenderBmeIcons = true;
+		//shouldRenderPmsIcons = true;
+		renderIcons();
+		displayBmeData();
+		displayPmsData();
 	}else if(displayMode == DISPLAY_MODE_MENU) {
 		displayMenu();
+	}else if(displayMode == DISPLAY_MODE_AIR_OTHER) {
+
+		tft.setTextColor(TFT_BLACK);
+		tft.setTextDatum(TL_DATUM);
+		tft.setTextFont(2);
+		tft.setTextSize(1);
+
+		tft.drawString("res", 8, 4);
+		tft.drawString("bVoc", 8, 20);
+		tft.drawString("co2", 8, 36);
+		tft.drawString("pm1.0 std/env", 8, 60);
+		tft.drawString("pm2.5 std/env", 8, 76);
+		tft.drawString("pm10 std/env", 8, 92);
+		tft.drawString("particles > 0.3 um", 8, 116);
+		tft.drawString("particles > 0.5 um", 8, 132);
+		tft.drawString("particles > 1.0 um", 8, 148);
+		tft.drawString("particles > 2.5 um", 8, 172);
+		tft.drawString("particles > 5.0 um", 8, 188);
+		tft.drawString("particles > 10 um", 8, 204);
+
+		displayBmeData();
+		displayPmsData();
 	}
 
 }
