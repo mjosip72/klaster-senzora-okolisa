@@ -1,7 +1,7 @@
 
 #if true
 
-//#define DEBUG_ME
+#define DEBUG_ME
 //#define USE_WIFI
 
 /* #region Includes */
@@ -28,7 +28,67 @@
 #include "Timer.h"
 #include "Log.h"
 
-//#include "images.h"
+/* lib urls 
+
+BSEC
+https://github.com/BoschSensortec/BSEC-Arduino-library
+
+TFT_eSPI
+https://github.com/Bodmer/TFT_eSPI
+
+PCF85063A
+https://github.com/e-radionicacom/PCF85063A-Arduino-Library
+
+SparkFun_BQ27441
+https://github.com/sparkfun/SparkFun_BQ27441_Arduino_Library
+
+AsyncTCP
+https://github.com/me-no-dev/AsyncTCP
+
+ESPAsyncWebServer
+https://github.com/me-no-dev/ESPAsyncWebServer
+
+*/
+
+	/* #region lib changes */
+
+	/* PCF85063A
+
+	PCF85063A.cpp
+	- remove function call Wire.begin()
+		in PCF85063A constructor
+	- remove function call readTime()
+		in functions:
+		*getSecond()
+		*getMinute()
+		*getHour()
+		*getDay()
+		*getWeekday()
+		*getMonth()
+		*getYear()
+
+	*/
+
+	/* SparkFun_BQ27441
+
+	SparkFunBQ27441.h
+	- remove extern object Q27441 battery at the end of file
+
+	SparkFunBQ27441.cpp
+	- remove object BQ27441 battery at the end of file
+
+	*/
+
+	/* TFT_eSPI
+
+	User_Setup_Select.h
+	- include "../../include/TFT_eSPI_setup.h"
+		after #include <User_Setup.h>
+	- exclude <User_Setup.h>
+	
+	*/
+
+	/* #endregion */
 
 /* #endregion */
 
