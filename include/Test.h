@@ -7,6 +7,7 @@
 #include <SD.h>
 #include <FS.h>
 #include "TouchUtils.h"
+#include <ESPmDNS.h>
 #define DEBUG
 #include "Log.h"
 
